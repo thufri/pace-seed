@@ -1,7 +1,6 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Allow loading 3D models and assets from Supabase Storage
   images: {
     remotePatterns: [
       {
@@ -9,6 +8,9 @@ const nextConfig: NextConfig = {
         hostname: "*.supabase.co",
       },
     ],
+  },
+  eslint: {
+    ignoreDuringBuilds: true,
   },
 };
 

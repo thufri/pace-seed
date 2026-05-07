@@ -41,7 +41,7 @@ type DataLayer = {
   label: string;
   value: string;
   unit: string;
-  recorded_at: string;
+  recorded_at?: string;
 };
 
 type Scenario = {
@@ -63,7 +63,7 @@ type ScenarioLayer = {
 
 type LocationZone = {
   id: string;
-  building_id: string;
+  building_id: string | null;
   twin_id: string;
   name: string;
   category: string;
@@ -94,10 +94,12 @@ type SensorDb = {
   x: number;
   y: number;
   z: number;
-  value?: number;
-  unit?: string;
-  description?: string;
+  value?: number | null;
+  unit?: string | null;
+  description?: string | null;
 };
+
+type VulnLabel = "vulnNone" | "vulnLow" | "vulnModerate" | "vulnHigh";
 
 const CATEGORIES = [
   { id: "stormwater", label: "🌧️ Stormwater & Surface Runoff", color: "3b82f6" },
@@ -122,7 +124,7 @@ const INFRA_TYPES = [
   { id: "parking", label: "🅿️ Parking", color: "4b5563" },
 ] as const;
 
-const inp: CSSProperties = {
+const inputStyle: CSSProperties = {
   background: "#1e293b",
   color: "white",
   padding: "8px 10px",
@@ -132,14 +134,14 @@ const inp: CSSProperties = {
   boxSizing: "border-box",
 };
 
-const card: CSSProperties = {
+const cardStyle: CSSProperties = {
   background: "#0f172a",
   borderRadius: 12,
   padding: 14,
   marginBottom: 12,
 };
 
-const btn = (bg = "#3b82f6"): CSSProperties => ({
+const primaryButton = (bg = "#3b82f6"): CSSProperties => ({
   background: bg,
   color: "white",
   padding: "9px 14px",
@@ -150,7 +152,7 @@ const btn = (bg = "#3b82f6"): CSSProperties => ({
   width: "100%",
 });
 
-const sBtn = (bg = "#3b82f6"): CSSProperties => ({
+const smallButton = (bg = "#3b82f6"): CSSProperties => ({
   background: bg,
   color: "white",
   border: "none",
@@ -161,60 +163,79 @@ const sBtn = (bg = "#3b82f6"): CSSProperties => ({
 });
 
 function getVuln(buildingId: string, layers: DataLayer[]) {
-  const c = new Set(layers.filter(l => l.building_id === buildingId).map(l => l.category)).size;
-  if (c === 0) return { score: 0, label: "vulnNone", color: "#475569", light: "⚫" };
-  if (c <= 1) return { score: 20, label: "vulnLow", color: "#22c55e", light: "🟢" };
-  if (c <= 3) return { score: 60, label: "vulnModerate", color: "#f59e0b", light: "🟡" };
-  return { score: 90, label: "vulnHigh", color: "#ef4444", light: "🔴" };
+  const count = new Set(
+    layers.filter((l) => l.building_id === buildingId).map((l) => l.category),
+  ).size;
+
+  if (count === 0) return { score: 0, label: "vulnNone" as VulnLabel, color: "#475569", light: "⚫" };
+  if (count <= 1) return { score: 20, label: "vulnLow" as VulnLabel, color: "#22c55e", light: "🟢" };
+  if (count <= 3) return { score: 60, label: "vulnModerate" as VulnLabel, color: "#f59e0b", light: "🟡" };
+  return { score: 90, label: "vulnHigh" as VulnLabel, color: "#ef4444", light: "🔴" };
 }
 
-function buildScenObjs(scenLayers: ScenarioLayer[], buildings: Building[]): ScenarioObject[] {
+function buildScenarioObjects(
+  scenLayers: ScenarioLayer[],
+  buildings: Building[],
+): ScenarioObject[] {
   const objs: ScenarioObject[] = [];
 
-  scenLayers.forEach(sl => {
-    const b = buildings.find(x => x.id === sl.building_id);
-    if (!b) return;
+  scenLayers.forEach((sl) => {
+    const building = buildings.find((x) => x.id === sl.building_id);
+    if (!building) return;
 
     const val = parseFloat(sl.value) || 1;
 
     if (sl.category === "ecology") {
-      const vt = sl.unit as "tree" | "bush" | "hedge" | "grass";
-      for (let i = 0; i < Math.min(Math.max(1, Math.round(val / 30)), 25); i++) {
+      const vegType =
+        sl.unit === "tree" || sl.unit === "bush" || sl.unit === "hedge" || sl.unit === "grass"
+          ? sl.unit
+          : "tree";
+
+      for (let i = 0; i < Math.min(Math.max(1, Math.round(val / 30)), 25); i += 1) {
         objs.push({
           id: `veg-${sl.id}-${i}`,
-          type: ["tree", "bush", "hedge", "grass"].includes(vt) ? vt : "tree",
-          x: b.x + (Math.random() - 0.5) * 25,
-          y: b.y,
-          z: b.z + (Math.random() - 0.5) * 25,
-          scale: vt === "tree" ? 3 + Math.random() * 2 : 2 + Math.random(),
+          type: vegType,
+          x: building.x + (Math.random() - 0.5) * 25,
+          y: building.y,
+          z: building.z + (Math.random() - 0.5) * 25,
+          scale: vegType === "tree" ? 3 + Math.random() * 2 : 2 + Math.random(),
         });
       }
-    } else if (sl.category === "stormwater") {
+      return;
+    }
+
+    if (sl.category === "stormwater") {
       objs.push({
         id: `water-${sl.id}`,
         type: "water",
-        x: b.x,
-        y: b.y,
-        z: b.z,
+        x: building.x,
+        y: building.y,
+        z: building.z,
         scale: Math.min(5 + val * 0.3, 30),
       });
-    } else if (sl.category === "heatisland") {
+      return;
+    }
+
+    if (sl.category === "heatisland") {
       objs.push({
         id: `heat-${sl.id}`,
         type: "heatmap",
-        x: b.x,
-        y: b.y,
-        z: b.z,
+        x: building.x,
+        y: building.y,
+        z: building.z,
         scale: Math.min(10 + val * 0.5, 40),
         intensity: val,
       });
-    } else if (sl.category === "accessibility") {
+      return;
+    }
+
+    if (sl.category === "accessibility") {
       objs.push({
         id: `wind-${sl.id}`,
         type: "wind",
-        x: b.x,
-        y: b.y,
-        z: b.z,
+        x: building.x,
+        y: building.y,
+        z: building.z,
         scale: 5 + val * 0.2,
       });
     }
@@ -223,7 +244,7 @@ function buildScenObjs(scenLayers: ScenarioLayer[], buildings: Building[]): Scen
   return objs;
 }
 
-export default function Platform() {
+export default function PlatformPage() {
   const router = useRouter();
   const [lang, setLang] = useState<Lang>("en");
   const t = T[lang];
@@ -310,38 +331,43 @@ export default function Platform() {
   }, []);
 
   useEffect(() => {
-    loadTwins();
+    void loadTwins();
   }, []);
 
   useEffect(() => {
     if (!twin) return;
-    loadBuildings(twin.id);
-    loadLayers(twin.id);
-    loadScenarios(twin.id);
-    loadZones(twin.id);
-    loadInfra(twin.id);
-    loadSensors(twin.id);
+    void loadBuildings(twin.id);
+    void loadLayers(twin.id);
+    void loadScenarios(twin.id);
+    void loadZones(twin.id);
+    void loadInfra(twin.id);
+    void loadSensors(twin.id);
   }, [twin]);
 
   useEffect(() => {
-    if (scenario) loadScenLayers(scenario.id);
+    if (scenario) void loadScenLayers(scenario.id);
   }, [scenario]);
 
   useEffect(() => {
     setSunConfig(sunActive ? { hour: sunHour, month: sunMonth } : null);
   }, [sunActive, sunHour, sunMonth]);
 
+  const notify = (m: string) => {
+    setMsg(m);
+    window.setTimeout(() => setMsg(""), 3000);
+  };
+
   const loadTwins = async () => {
     const { data, error } = await supabase.from("twins").select("*");
     if (error) {
-      notify("⚠️ " + error.message);
+      notify(`⚠️ ${error.message}`);
       return;
     }
     const items = (data || []) as Twin[];
     setTwins(items);
-    setTwin(prev => {
+    setTwin((prev) => {
       if (items.length === 0) return null;
-      if (prev) return items.find(x => x.id === prev.id) || items[0];
+      if (prev) return items.find((x) => x.id === prev.id) || items[0];
       return items[0];
     });
   };
@@ -360,9 +386,9 @@ export default function Platform() {
     const { data } = await supabase.from("scenarios").select("*").eq("twin_id", tid);
     const items = (data || []) as Scenario[];
     setScenarios(items);
-    setScenario(prev => {
+    setScenario((prev) => {
       if (items.length === 0) return null;
-      if (prev) return items.find(x => x.id === prev.id) || items[0];
+      if (prev) return items.find((x) => x.id === prev.id) || items[0];
       return items[0];
     });
   };
@@ -387,11 +413,6 @@ export default function Platform() {
     setSensors((data || []) as SensorDb[]);
   };
 
-  const notify = (m: string) => {
-    setMsg(m);
-    setTimeout(() => setMsg(""), 3000);
-  };
-
   const saveTwin = async () => {
     if (!twinName || !twinFile) {
       notify("⚠️ Enter a name and select a .glb file!");
@@ -402,8 +423,9 @@ export default function Platform() {
 
     const fileName = `${Date.now()}-${twinFile.name.replace(/\s/g, "_")}`;
     const { data: up, error: upErr } = await supabase.storage.from("models").upload(fileName, twinFile);
+
     if (upErr) {
-      notify("⚠️ Upload failed: " + upErr.message);
+      notify(`⚠️ Upload failed: ${upErr.message}`);
       setUploading(false);
       return;
     }
@@ -423,7 +445,7 @@ export default function Platform() {
       setTwinDesc("");
       setTwinFile(null);
       setShowNewTwin(false);
-      loadTwins();
+      await loadTwins();
     }
 
     setUploading(false);
@@ -433,7 +455,7 @@ export default function Platform() {
     await supabase.from("twins").delete().eq("id", id);
     notify("🗑️");
     setTwin(null);
-    loadTwins();
+    await loadTwins();
   };
 
   const handlePlaceMarker = useCallback((x: number, y: number, z: number) => {
@@ -444,7 +466,7 @@ export default function Platform() {
   }, []);
 
   const handleAddZoneVertex = useCallback((x: number, y: number, z: number) => {
-    setZoneVertices(prev => {
+    setZoneVertices((prev) => {
       notify(`📐 Point ${prev.length + 1} added`);
       return [...prev, { x, y, z }];
     });
@@ -469,7 +491,7 @@ export default function Platform() {
       setLocName("");
       setLocDesc("");
       setPendingLoc(null);
-      loadBuildings(twin.id);
+      await loadBuildings(twin.id);
     }
   };
 
@@ -477,7 +499,7 @@ export default function Platform() {
     if (!twin) return;
     await supabase.from("buildings").delete().eq("id", id);
     notify("🗑️");
-    loadBuildings(twin.id);
+    await loadBuildings(twin.id);
   };
 
   const finishZone = async () => {
@@ -486,7 +508,7 @@ export default function Platform() {
       return;
     }
 
-    const cat = CATEGORIES.find(c => c.id === zoneCat);
+    const cat = CATEGORIES.find((c) => c.id === zoneCat);
     const { error } = await supabase.from("location_zones").insert({
       twin_id: twin.id,
       building_id: null,
@@ -501,7 +523,7 @@ export default function Platform() {
       setZoneName("");
       setZoneVertices([]);
       setDrawingZone(false);
-      loadZones(twin.id);
+      await loadZones(twin.id);
     }
   };
 
@@ -509,7 +531,7 @@ export default function Platform() {
     if (!twin) return;
     await supabase.from("location_zones").delete().eq("id", id);
     notify("🗑️");
-    loadZones(twin.id);
+    await loadZones(twin.id);
   };
 
   const saveInfra = async () => {
@@ -518,7 +540,7 @@ export default function Platform() {
       return;
     }
 
-    const it = INFRA_TYPES.find(i => i.id === infraType);
+    const it = INFRA_TYPES.find((i) => i.id === infraType);
     const { error } = await supabase.from("infrastructure").insert({
       twin_id: twin.id,
       type: infraType,
@@ -538,7 +560,7 @@ export default function Platform() {
       setInfraName("");
       setInfraDesc("");
       setShowNewInfra(false);
-      loadInfra(twin.id);
+      await loadInfra(twin.id);
     }
   };
 
@@ -546,30 +568,30 @@ export default function Platform() {
     if (!twin) return;
     await supabase.from("infrastructure").delete().eq("id", id);
     notify("🗑️");
-    loadInfra(twin.id);
+    await loadInfra(twin.id);
   };
 
   const saveLayer = async () => {
-    if (!dlLoc || !dlLabel || !dlVal) {
+    if (!dlLoc || !dlLabel || !dlVal || !twin) {
       notify("⚠️ Fill in all fields!");
       return;
     }
 
     const { error } = await supabase.from("data_layers").insert({
       building_id: dlLoc,
-      twin_id: twin?.id,
+      twin_id: twin.id,
       category: dlCat,
       label: dlLabel,
       value: dlVal,
       unit: dlUnit,
     });
 
-    if (!error && twin) {
+    if (!error) {
       notify("✅ Data layer added!");
       setDlLabel("");
       setDlVal("");
       setDlUnit("");
-      loadLayers(twin.id);
+      await loadLayers(twin.id);
     }
   };
 
@@ -577,7 +599,7 @@ export default function Platform() {
     if (!twin) return;
     await supabase.from("data_layers").delete().eq("id", id);
     notify("🗑️");
-    loadLayers(twin.id);
+    await loadLayers(twin.id);
   };
 
   const saveScenario = async () => {
@@ -597,7 +619,7 @@ export default function Platform() {
       setScenName("");
       setScenDesc("");
       setShowNewScen(false);
-      loadScenarios(twin.id);
+      await loadScenarios(twin.id);
     }
   };
 
@@ -606,7 +628,7 @@ export default function Platform() {
     await supabase.from("scenarios").delete().eq("id", id);
     notify("🗑️");
     setScenario(null);
-    loadScenarios(twin.id);
+    await loadScenarios(twin.id);
   };
 
   const saveScenLayer = async () => {
@@ -629,14 +651,14 @@ export default function Platform() {
       setSlLabel("");
       setSlVal("");
       setSlUnit("tree");
-      loadScenLayers(scenario.id);
+      await loadScenLayers(scenario.id);
     }
   };
 
   const deleteScenLayer = async (id: string) => {
     if (!scenario) return;
     await supabase.from("scenario_layers").delete().eq("id", id);
-    loadScenLayers(scenario.id);
+    await loadScenLayers(scenario.id);
   };
 
   const saveSensor = async () => {
@@ -664,7 +686,7 @@ export default function Platform() {
       setSensorUnit("");
       setSensorDesc("");
       setShowNewSensor(false);
-      loadSensors(twin.id);
+      await loadSensors(twin.id);
     }
   };
 
@@ -672,53 +694,14 @@ export default function Platform() {
     if (!twin) return;
     await supabase.from("sensors").delete().eq("id", id);
     notify("🗑️");
-    loadSensors(twin.id);
+    await loadSensors(twin.id);
   };
 
-  const exportJSON = () => {
-    if (!twin) return;
-    const data = {
-      twin,
-      buildings,
-      layers,
-      zones,
-      infra,
-      sensors,
-      scenarios,
-      scenLayers,
-      exportedAt: new Date().toISOString(),
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${twin.name.replace(/\s/g, "_")}_export.json`;
-    a.click();
-    notify("✅ JSON exported!");
-  };
-
-  const exportCSV = () => {
-    if (!twin || layers.length === 0) {
-      notify("⚠️ No data to export");
-      return;
+  const markers: Marker[] = buildings.flatMap((b) => {
+    const bl = layers.filter((l) => l.building_id === b.id);
+    if (bl.length === 0) {
+      return [{ id: b.id, name: b.name, x: b.x, y: b.y, z: b.z }];
     }
-
-    const header = "location,category,label,value,unit,recorded_at";
-    const rows = layers.map(l => {
-      const loc = buildings.find(b => b.id === l.building_id);
-      return `"${loc?.name || ""}","${l.category}","${l.label}","${l.value}","${l.unit}","${l.recorded_at || ""}"`;
-    });
-
-    const blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${twin.name.replace(/\s/g, "_")}_data.csv`;
-    a.click();
-    notify("✅ CSV exported!");
-  };
-
-  const markers: Marker[] = buildings.flatMap(b => {
-    const bl = layers.filter(l => l.building_id === b.id);
-    if (bl.length === 0) return [{ id: b.id, name: b.name, x: b.x, y: b.y, z: b.z }];
     return bl.map((l, i) => ({
       id: `${b.id}-${l.id}`,
       name: b.name,
@@ -731,7 +714,7 @@ export default function Platform() {
     }));
   });
 
-  const threeZones: Zone[] = zones.map(z => ({
+  const threeZones: Zone[] = zones.map((z) => ({
     id: z.id,
     name: z.name,
     category: z.category,
@@ -739,7 +722,7 @@ export default function Platform() {
     vertices: z.vertices,
   }));
 
-  const threeInfra: Infrastructure[] = infra.map(i => ({
+  const threeInfra: Infrastructure[] = infra.map((i) => ({
     id: i.id,
     type: i.type,
     name: i.name,
@@ -752,18 +735,19 @@ export default function Platform() {
     color: i.color,
   }));
 
-  const threeSensors: SensorItem[] = sensors.map(s => ({
+  const threeSensors: SensorItem[] = sensors.map((s) => ({
     id: s.id,
     name: s.name,
     type: s.type,
     x: s.x,
     y: s.y,
     z: s.z,
-    value: s.value,
-    unit: s.unit,
+    value: s.value ?? undefined,
+    unit: s.unit ?? undefined,
   }));
 
-  const scenarioObjects = scenario ? buildScenObjs(scenLayers, buildings) : [];
+  const scenarioObjects = scenario ? buildScenarioObjects(scenLayers, buildings) : [];
+
   const extremeWeatherConfig: ExtremeWeatherConfig | null = extremeType
     ? { type: extremeType, intensity: extremeIntensity }
     : null;
@@ -780,11 +764,12 @@ export default function Platform() {
           : t.heatDesc;
 
     if (!descs) return "";
-    const idx = extremeIntensity <= 3 ? 0 : extremeIntensity <= 6 ? 1 : extremeIntensity <= 8 ? 2 : 3;
+    const idx =
+      extremeIntensity <= 3 ? 0 : extremeIntensity <= 6 ? 1 : extremeIntensity <= 8 ? 2 : 3;
     return descs[idx];
   };
 
-  const TABS = [t.twins, t.locations, t.data, t.scenarios, t.infra, t.weather, t.sensors];
+  const tabs = [t.twins, t.locations, t.data, t.scenarios, t.infra, t.weather, t.sensors];
 
   return (
     <main
@@ -829,7 +814,7 @@ export default function Platform() {
             gap: 6,
           }}
         >
-          {(["en", "sv"] as Lang[]).map(l => (
+          {(["en", "sv"] as Lang[]).map((l) => (
             <button
               key={l}
               onClick={() => {
@@ -942,46 +927,38 @@ export default function Platform() {
 
       <div
         style={{
-          width: 430,
-          background: "#111827",
-          borderLeft: "1px solid #1e293b",
+          width: 400,
+          background: "#1e293b",
+          borderLeft: "1px solid #334155",
           display: "flex",
           flexDirection: "column",
         }}
       >
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
-            gap: 6,
-            padding: 12,
-            borderBottom: "1px solid #1e293b",
-            background: "#0b1220",
+            display: "flex",
+            borderBottom: "1px solid #334155",
+            flexShrink: 0,
+            overflowX: "auto",
           }}
         >
-          {TABS.map((label, i) => (
+          {tabs.map((tb, i) => (
             <button
-              key={`tab-${i}`}
+              key={i}
               onClick={() => setTab(i)}
               style={{
-                background: tab === i ? "#2563eb" : "#111827",
-                color: "white",
-                border: "1px solid #334155",
-                borderRadius: 10,
-                minHeight: 60,
+                flexShrink: 0,
+                padding: "10px 6px",
+                background: "none",
+                border: "none",
                 cursor: "pointer",
-                fontSize: 11,
-                fontWeight: 700,
-                padding: 6,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 4,
+                color: tab === i ? "white" : "#64748b",
+                fontSize: 10,
+                fontWeight: tab === i ? "bold" : "normal",
+                borderBottom: tab === i ? "2px solid #3b82f6" : "2px solid transparent",
               }}
             >
-              <span style={{ fontSize: 16 }}>{["🌐", "📍", "📊", "🔬", "🏗️", "🌦️", "📡"][i]}</span>
-              <span style={{ lineHeight: 1.1, textAlign: "center" }}>{label}</span>
+              {tb}
             </button>
           ))}
         </div>
@@ -989,11 +966,11 @@ export default function Platform() {
         {msg && (
           <div
             style={{
-              padding: "10px 14px",
-              borderBottom: "1px solid #1e293b",
-              background: "#13233f",
+              background: "#1e3a5f",
+              padding: "8px 14px",
+              fontSize: 13,
               color: "#7dd3fc",
-              fontSize: 12,
+              flexShrink: 0,
             }}
           >
             {msg}
@@ -1003,204 +980,160 @@ export default function Platform() {
         <div style={{ flex: 1, overflowY: "auto", padding: 14 }}>
           {tab === 0 && (
             <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <h2 style={{ margin: 0, fontSize: 15 }}>🌐 {t.twins}</h2>
-                <button onClick={() => setShowNewTwin(!showNewTwin)} style={sBtn(showNewTwin ? "#475569" : "#3b82f6")}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 12,
+                }}
+              >
+                <h2 style={{ margin: 0, fontSize: 15 }}>{t.twins}</h2>
+                <button onClick={() => setShowNewTwin(!showNewTwin)} style={smallButton(showNewTwin ? "#475569" : "#3b82f6")}>
                   {showNewTwin ? t.cancel : t.newTwin}
                 </button>
               </div>
 
               {showNewTwin && (
-                <div style={{ ...card, display: "flex", flexDirection: "column", gap: 8 }}>
-                  <input
-                    type="text"
-                    placeholder={lang === "sv" ? "Tvillingnamn" : "Twin name"}
-                    style={inp}
-                    value={twinName}
-                    onChange={e => setTwinName(e.target.value)}
-                  />
-                  <input
-                    type="text"
-                    placeholder={t.description}
-                    style={inp}
-                    value={twinDesc}
-                    onChange={e => setTwinDesc(e.target.value)}
-                  />
+                <div style={{ ...cardStyle, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <input type="text" placeholder={t.twinName} style={inputStyle} value={twinName} onChange={(e) => setTwinName(e.target.value)} />
+                  <input type="text" placeholder={t.description} style={inputStyle} value={twinDesc} onChange={(e) => setTwinDesc(e.target.value)} />
                   <div style={{ display: "flex", gap: 8 }}>
-                    <input
-                      type="text"
-                      placeholder={t.latitude}
-                      style={{ ...inp, width: "50%" }}
-                      value={twinLat}
-                      onChange={e => setTwinLat(e.target.value)}
-                    />
-                    <input
-                      type="text"
-                      placeholder={t.longitude}
-                      style={{ ...inp, width: "50%" }}
-                      value={twinLng}
-                      onChange={e => setTwinLng(e.target.value)}
-                    />
+                    <input type="text" placeholder={t.latitude} style={{ ...inputStyle, width: "50%" }} value={twinLat} onChange={(e) => setTwinLat(e.target.value)} />
+                    <input type="text" placeholder={t.longitude} style={{ ...inputStyle, width: "50%" }} value={twinLng} onChange={(e) => setTwinLng(e.target.value)} />
                   </div>
+                  <label style={{ color: "#94a3b8", fontSize: 12 }}>{t.selectFile}</label>
                   <input
                     type="file"
                     accept=".glb"
-                    onChange={e => setTwinFile(e.target.files?.[0] || null)}
-                    style={{ color: "#cbd5e1", fontSize: 12 }}
+                    style={{ color: "white", fontSize: 13 }}
+                    onChange={(e) => setTwinFile(e.target.files?.[0] || null)}
                   />
-                  <button onClick={saveTwin} style={btn("#3b82f6")}>
+                  <button onClick={saveTwin} style={primaryButton()} disabled={uploading}>
                     {uploading ? t.uploading : t.save}
                   </button>
                 </div>
               )}
 
-              {twins.map(tw => (
+              {twins.map((tw) => (
                 <div
                   key={tw.id}
+                  onClick={() => setTwin(tw)}
                   style={{
-                    ...card,
-                    border: tw.id === twin?.id ? "1px solid #3b82f6" : "1px solid transparent",
+                    ...cardStyle,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    border: twin?.id === tw.id ? "1px solid #3b82f6" : "1px solid transparent",
                     cursor: "pointer",
                   }}
-                  onClick={() => setTwin(tw)}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                    <div>
-                      <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>{tw.name}</p>
-                      {tw.description && (
-                        <p style={{ margin: "4px 0 0", color: "#94a3b8", fontSize: 12 }}>{tw.description}</p>
-                      )}
-                      <p style={{ margin: "4px 0 0", color: "#64748b", fontSize: 11 }}>
-                        {tw.latitude}, {tw.longitude}
-                      </p>
-                    </div>
-                    <button
-                      onClick={e => {
-                        e.stopPropagation();
-                        deleteTwin(tw.id);
-                      }}
-                      style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer" }}
-                    >
-                      🗑️
-                    </button>
+                  <div>
+                    <p style={{ margin: 0, fontWeight: 600, fontSize: 14 }}>🌐 {tw.name}</p>
+                    {tw.description && <p style={{ margin: "2px 0 0", fontSize: 12, color: "#94a3b8" }}>{tw.description}</p>}
+                    <p style={{ margin: "2px 0 0", fontSize: 11, color: "#475569" }}>📍 {tw.latitude}, {tw.longitude}</p>
                   </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void deleteTwin(tw.id);
+                    }}
+                    style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer", fontSize: 16 }}
+                  >
+                    🗑️
+                  </button>
                 </div>
               ))}
 
-              {twin && (
-                <div style={card}>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button onClick={exportJSON} style={btn("#0891b2")}>{t.exportJson}</button>
-                    <button onClick={exportCSV} style={btn("#10b981")}>{t.exportCsv}</button>
-                  </div>
-                </div>
-              )}
+              {twins.length === 0 && !showNewTwin && <p style={{ color: "#64748b", fontSize: 13 }}>{t.noTwins}</p>}
             </div>
           )}
 
           {tab === 1 && (
             <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <h2 style={{ margin: 0, fontSize: 15 }}>📍 {t.locations}</h2>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 12,
+                }}
+              >
+                <h2 style={{ margin: 0, fontSize: 15 }}>{t.locations}</h2>
+                <button
+                  onClick={() => {
+                    setPlacingMode(true);
+                    notify(t.placeOnModel);
+                  }}
+                  style={smallButton("#059669")}
+                >
+                  {t.placeLocation}
+                </button>
               </div>
 
               {pendingLoc && (
-                <div style={{ ...card, display: "flex", flexDirection: "column", gap: 8 }}>
-                  <p style={{ margin: 0, fontSize: 12, color: "#10b981", fontWeight: 600 }}>{t.positionSet}</p>
-                  <input
-                    type="text"
-                    placeholder={t.locationName}
-                    style={inp}
-                    value={locName}
-                    onChange={e => setLocName(e.target.value)}
-                  />
-                  <input
-                    type="text"
-                    placeholder={t.description}
-                    style={inp}
-                    value={locDesc}
-                    onChange={e => setLocDesc(e.target.value)}
-                  />
-                  <button onClick={saveLoc} style={btn("#10b981")}>{t.save}</button>
+                <div style={{ ...cardStyle, border: "1px solid #059669", display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+                  <p style={{ margin: 0, fontSize: 12, color: "#86efac" }}>{t.positionSet}</p>
+                  <input type="text" placeholder={t.locationName} style={inputStyle} value={locName} onChange={(e) => setLocName(e.target.value)} />
+                  <input type="text" placeholder={t.description} style={inputStyle} value={locDesc} onChange={(e) => setLocDesc(e.target.value)} />
+                  <button onClick={saveLoc} style={primaryButton("#059669")}>{t.save}</button>
+                  <button onClick={() => setPendingLoc(null)} style={primaryButton("#475569")}>{t.cancel}</button>
                 </div>
               )}
 
               {drawingZone && (
-                <div style={{ ...card, display: "flex", flexDirection: "column", gap: 8 }}>
-                  <input
-                    type="text"
-                    placeholder={lang === "sv" ? "Zonnamn" : "Zone name"}
-                    style={inp}
-                    value={zoneName}
-                    onChange={e => setZoneName(e.target.value)}
-                  />
-                  <select style={inp} value={zoneCat} onChange={e => setZoneCat(e.target.value)}>
-                    {CATEGORIES.map(c => (
+                <div style={{ ...cardStyle, border: "1px solid #7c3aed", display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+                  <p style={{ margin: 0, fontSize: 12, color: "#c4b5fd" }}>✏️ {zoneVertices.length} {t.zonePoints}</p>
+                  <input type="text" placeholder={t.locationName} style={inputStyle} value={zoneName} onChange={(e) => setZoneName(e.target.value)} />
+                  <select style={inputStyle} value={zoneCat} onChange={(e) => setZoneCat(e.target.value)}>
+                    {CATEGORIES.map((c) => (
                       <option key={c.id} value={c.id}>{c.label}</option>
                     ))}
                   </select>
-                  <p style={{ margin: 0, fontSize: 11, color: "#64748b" }}>
-                    {zoneVertices.length} {t.zonePoints}
-                  </p>
-                  <button onClick={finishZone} style={btn("#7c3aed")}>{t.finishZone}</button>
+                  <button onClick={finishZone} style={primaryButton("#7c3aed")} disabled={zoneVertices.length < 3}>
+                    {t.finishZone} ({zoneVertices.length} pts)
+                  </button>
+                  <button
+                    onClick={() => {
+                      setDrawingZone(false);
+                      setZoneVertices([]);
+                    }}
+                    style={primaryButton("#475569")}
+                  >
+                    {t.cancel}
+                  </button>
                 </div>
               )}
 
-              {buildings.map(b => {
-                const vuln = getVuln(b.id, layers);
+              {buildings.map((b) => {
+                const v = getVuln(b.id, layers);
                 return (
-                  <div key={b.id} style={card}>
+                  <div key={b.id} style={cardStyle}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                       <div>
-                        <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>📍 {b.name}</p>
-                        {b.description && (
-                          <p style={{ margin: "2px 0", fontSize: 11, color: "#94a3b8" }}>{b.description}</p>
-                        )}
-                        <p style={{ margin: "2px 0", fontSize: 11, color: "#64748b" }}>
-                          {b.x}, {b.y}, {b.z}
-                        </p>
+                        <p style={{ margin: 0, fontWeight: 600, fontSize: 14 }}>📍 {b.name}</p>
+                        {b.description && <p style={{ margin: "2px 0 0", fontSize: 12, color: "#94a3b8" }}>{b.description}</p>}
+                        <p style={{ margin: "2px 0 0", fontSize: 11, color: "#475569" }}>{b.x.toFixed(1)}, {b.y.toFixed(1)}, {b.z.toFixed(1)}</p>
                       </div>
                       <button
-                        onClick={() => deleteLoc(b.id)}
-                        style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer" }}
+                        onClick={() => void deleteLoc(b.id)}
+                        style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer", fontSize: 16 }}
                       >
                         🗑️
                       </button>
                     </div>
 
-                    <div
-                      style={{
-                        marginTop: 10,
-                        display: "flex",
-                        justifyContent: "space-between",
-                        gap: 10,
-                      }}
-                    >
-                      <div
-                        style={{
-                          flex: 1,
-                          background: "#111827",
-                          borderRadius: 8,
-                          padding: "8px 10px",
-                        }}
-                      >
+                    <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                      <div style={{ flex: 1, background: "#111827", borderRadius: 8, padding: "8px 10px" }}>
                         <p style={{ margin: 0, fontSize: 11, color: "#64748b" }}>{t.vulnerability}</p>
-                        <p style={{ margin: "4px 0 0", fontSize: 14, color: vuln.color, fontWeight: 700 }}>
-                          {vuln.light} {t[vuln.label]}
+                        <p style={{ margin: "4px 0 0", fontSize: 13, color: v.color, fontWeight: 700 }}>
+                          {v.light} {t[v.label]}
                         </p>
                       </div>
-
-                      <div
-                        style={{
-                          flex: 1,
-                          background: "#111827",
-                          borderRadius: 8,
-                          padding: "8px 10px",
-                        }}
-                      >
+                      <div style={{ flex: 1, background: "#111827", borderRadius: 8, padding: "8px 10px" }}>
                         <p style={{ margin: 0, fontSize: 11, color: "#64748b" }}>{t.dataCoverage}</p>
-                        <p style={{ margin: "4px 0 0", fontSize: 14, color: "#e2e8f0", fontWeight: 700 }}>
-                          {new Set(layers.filter(l => l.building_id === b.id).map(l => l.category)).size}/5
+                        <p style={{ margin: "4px 0 0", fontSize: 13, color: "#7dd3fc", fontWeight: 700 }}>
+                          {new Set(layers.filter((l) => l.building_id === b.id).map((l) => l.category)).size}/5
                         </p>
                       </div>
                     </div>
@@ -1208,18 +1141,18 @@ export default function Platform() {
                 );
               })}
 
-              {zones.map(z => (
-                <div key={z.id} style={card}>
+              {zones.map((z) => (
+                <div key={z.id} style={{ ...cardStyle, border: "1px solid #334155" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div>
-                      <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>📐 {z.name}</p>
+                      <p style={{ margin: 0, fontWeight: 600, fontSize: 14 }}>📐 {z.name}</p>
                       <p style={{ margin: "2px 0 0", fontSize: 11, color: "#64748b" }}>
                         {z.category} · {z.vertices.length} pts
                       </p>
                     </div>
                     <button
-                      onClick={() => deleteZone(z.id)}
-                      style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer" }}
+                      onClick={() => void deleteZone(z.id)}
+                      style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer", fontSize: 16 }}
                     >
                       🗑️
                     </button>
@@ -1235,55 +1168,47 @@ export default function Platform() {
 
           {tab === 2 && (
             <div>
-              <h2 style={{ margin: "0 0 12px", fontSize: 15 }}>📊 {t.data}</h2>
+              <h2 style={{ margin: "0 0 12px", fontSize: 15 }}>{t.data}</h2>
 
-              <div style={{ ...card, display: "flex", flexDirection: "column", gap: 8 }}>
-                <select style={inp} value={dlLoc} onChange={e => setDlLoc(e.target.value)}>
+              <div style={{ ...cardStyle, display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+                <select style={inputStyle} value={dlLoc} onChange={(e) => setDlLoc(e.target.value)}>
                   <option value="">{t.selectLocation}</option>
-                  {buildings.map(b => (
+                  {buildings.map((b) => (
                     <option key={b.id} value={b.id}>{b.name}</option>
                   ))}
                 </select>
 
-                <select style={inp} value={dlCat} onChange={e => setDlCat(e.target.value)}>
-                  {CATEGORIES.map(c => (
+                <select style={inputStyle} value={dlCat} onChange={(e) => setDlCat(e.target.value)}>
+                  {CATEGORIES.map((c) => (
                     <option key={c.id} value={c.id}>{c.label}</option>
                   ))}
                 </select>
 
-                <input type="text" placeholder={t.label} style={inp} value={dlLabel} onChange={e => setDlLabel(e.target.value)} />
+                <input type="text" placeholder={t.label} style={inputStyle} value={dlLabel} onChange={(e) => setDlLabel(e.target.value)} />
                 <div style={{ display: "flex", gap: 8 }}>
-                  <input type="text" placeholder={t.value} style={{ ...inp, width: "50%" }} value={dlVal} onChange={e => setDlVal(e.target.value)} />
-                  <input type="text" placeholder={t.unit} style={{ ...inp, width: "50%" }} value={dlUnit} onChange={e => setDlUnit(e.target.value)} />
+                  <input type="text" placeholder={t.value} style={{ ...inputStyle, width: "50%" }} value={dlVal} onChange={(e) => setDlVal(e.target.value)} />
+                  <input type="text" placeholder={t.unit} style={{ ...inputStyle, width: "50%" }} value={dlUnit} onChange={(e) => setDlUnit(e.target.value)} />
                 </div>
 
-                <button onClick={saveLayer} style={btn("#10b981")}>{t.addLayer}</button>
+                <button onClick={saveLayer} style={primaryButton()}>{t.addLayer}</button>
               </div>
 
-              {layers.map(l => {
-                const loc = buildings.find(b => b.id === l.building_id);
-                const cat = CATEGORIES.find(c => c.id === l.category);
+              {layers.map((layer) => {
+                const loc = buildings.find((b) => b.id === layer.building_id);
+                const cat = CATEGORIES.find((c) => c.id === layer.category);
                 return (
-                  <div key={l.id} style={card}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                      <div>
-                        <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>
-                          {cat?.label.split(" ")[0]} {l.label}
-                        </p>
-                        <p style={{ margin: "2px 0", fontSize: 11, color: "#64748b" }}>
-                          {loc?.name || "—"} · {l.category}
-                        </p>
-                        <p style={{ margin: 0, fontSize: 14, color: "#e2e8f0", fontWeight: 700 }}>
-                          {l.value} {l.unit}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => deleteLayer(l.id)}
-                        style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer" }}
-                      >
-                        🗑️
-                      </button>
+                  <div key={layer.id} style={{ ...cardStyle, display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div>
+                      <p style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>{cat?.label || layer.category}</p>
+                      <p style={{ margin: "2px 0", fontSize: 12, color: "#94a3b8" }}>{loc?.name} — {layer.label}</p>
+                      <p style={{ margin: 0, fontSize: 13, color: "#7dd3fc", fontWeight: 600 }}>{layer.value} {layer.unit}</p>
                     </div>
+                    <button
+                      onClick={() => void deleteLayer(layer.id)}
+                      style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer", fontSize: 16 }}
+                    >
+                      🗑️
+                    </button>
                   </div>
                 );
               })}
@@ -1295,136 +1220,113 @@ export default function Platform() {
           {tab === 3 && (
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <h2 style={{ margin: 0, fontSize: 15 }}>🔬 {t.scenarios}</h2>
-                <button onClick={() => setShowNewScen(!showNewScen)} style={sBtn(showNewScen ? "#475569" : "#7c3aed")}>
+                <h2 style={{ margin: 0, fontSize: 15 }}>{t.scenarios}</h2>
+                <button onClick={() => setShowNewScen(!showNewScen)} style={smallButton(showNewScen ? "#475569" : "#7c3aed")}>
                   {showNewScen ? t.cancel : t.newScen}
                 </button>
               </div>
 
               {showNewScen && (
-                <div style={{ ...card, display: "flex", flexDirection: "column", gap: 8 }}>
-                  <input type="text" placeholder={lang === "sv" ? "Scenarionamn" : "Scenario name"} style={inp} value={scenName} onChange={e => setScenName(e.target.value)} />
-                  <input type="text" placeholder={t.description} style={inp} value={scenDesc} onChange={e => setScenDesc(e.target.value)} />
-                  <button onClick={saveScenario} style={btn("#7c3aed")}>{t.save}</button>
+                <div style={{ ...cardStyle, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <input type="text" placeholder={t.locationName} style={inputStyle} value={scenName} onChange={(e) => setScenName(e.target.value)} />
+                  <input type="text" placeholder={t.description} style={inputStyle} value={scenDesc} onChange={(e) => setScenDesc(e.target.value)} />
+                  <button onClick={saveScenario} style={primaryButton("#7c3aed")}>{t.save}</button>
                 </div>
               )}
 
-              {scenarios.map(sc => (
-                <div
-                  key={sc.id}
-                  style={{
-                    ...card,
-                    border: sc.id === scenario?.id ? "1px solid #7c3aed" : "1px solid transparent",
-                    cursor: "pointer",
+              {scenarios.length > 0 && (
+                <select
+                  style={{ ...inputStyle, marginBottom: 12 }}
+                  value={scenario?.id || ""}
+                  onChange={(e) => {
+                    const sc = scenarios.find((x) => x.id === e.target.value);
+                    if (sc) setScenario(sc);
                   }}
-                  onClick={() => setScenario(sc)}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                    <div>
-                      <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>{sc.name}</p>
-                      {sc.description && (
-                        <p style={{ margin: "2px 0", fontSize: 11, color: "#94a3b8" }}>{sc.description}</p>
-                      )}
-                    </div>
-                    <button
-                      onClick={e => {
-                        e.stopPropagation();
-                        deleteScenario(sc.id);
-                      }}
-                      style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer" }}
-                    >
-                      🗑️
-                    </button>
-                  </div>
-                </div>
-              ))}
+                  {scenarios.map((sc) => (
+                    <option key={sc.id} value={sc.id}>{sc.name}</option>
+                  ))}
+                </select>
+              )}
 
               {scenario && (
-                <div style={card}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                    <p style={{ margin: 0, fontWeight: 700 }}>{scenario.name}</p>
-                    <button onClick={() => setShowScenLayer(!showScenLayer)} style={sBtn(showScenLayer ? "#475569" : "#10b981")}>
-                      {showScenLayer ? t.cancel : t.addToScen}
-                    </button>
+                <div style={cardStyle}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <p style={{ margin: 0, fontWeight: 700, color: "#c4b5fd", fontSize: 14 }}>🔬 {scenario.name}</p>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={() => setShowScenLayer(!showScenLayer)} style={smallButton(showScenLayer ? "#475569" : "#7c3aed")}>
+                        {showScenLayer ? t.cancel : "+ Add"}
+                      </button>
+                      <button onClick={() => void deleteScenario(scenario.id)} style={smallButton("#dc2626")}>{t.delete}</button>
+                    </div>
                   </div>
 
                   {showScenLayer && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
-                      <select style={inp} value={slLoc} onChange={e => setSlLoc(e.target.value)}>
+                      <select style={inputStyle} value={slLoc} onChange={(e) => setSlLoc(e.target.value)}>
                         <option value="">{t.selectLocation}</option>
-                        {buildings.map(b => (
+                        {buildings.map((b) => (
                           <option key={b.id} value={b.id}>{b.name}</option>
                         ))}
                       </select>
 
-                      <select style={inp} value={slCat} onChange={e => setSlCat(e.target.value)}>
-                        {CATEGORIES.map(c => (
+                      <select style={inputStyle} value={slCat} onChange={(e) => setSlCat(e.target.value)}>
+                        {CATEGORIES.map((c) => (
                           <option key={c.id} value={c.id}>{c.label}</option>
                         ))}
                       </select>
 
-                      <input type="text" placeholder={t.label} style={inp} value={slLabel} onChange={e => setSlLabel(e.target.value)} />
-                      <input type="text" placeholder={t.value} style={inp} value={slVal} onChange={e => setSlVal(e.target.value)} />
+                      <input type="text" placeholder={t.label} style={inputStyle} value={slLabel} onChange={(e) => setSlLabel(e.target.value)} />
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <input type="text" placeholder={t.value} style={{ ...inputStyle, width: "50%" }} value={slVal} onChange={(e) => setSlVal(e.target.value)} />
+                        {slCat === "ecology" ? (
+                          <select style={{ ...inputStyle, width: "50%" }} value={slUnit} onChange={(e) => setSlUnit(e.target.value)}>
+                            {VEG.map((v) => (
+                              <option key={v.id} value={v.id}>{v.label}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input type="text" placeholder={t.unit} style={{ ...inputStyle, width: "50%" }} value={slUnit} onChange={(e) => setSlUnit(e.target.value)} />
+                        )}
+                      </div>
 
-                      {slCat === "ecology" ? (
-                        <select style={inp} value={slUnit} onChange={e => setSlUnit(e.target.value)}>
-                          {VEG.map(v => (
-                            <option key={v.id} value={v.id}>{v.label}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <input type="text" placeholder={t.unit} style={inp} value={slUnit} onChange={e => setSlUnit(e.target.value)} />
-                      )}
-
-                      <button onClick={saveScenLayer} style={btn("#10b981")}>{t.addToScen}</button>
+                      <button onClick={saveScenLayer} style={primaryButton("#7c3aed")}>{t.addToScen}</button>
                     </div>
                   )}
 
-                  {scenLayers.map(sl => {
-                    const loc = buildings.find(b => b.id === sl.building_id);
-                    const current = layers.find(l => l.building_id === sl.building_id && l.category === sl.category);
-                    return (
-                      <div key={sl.id} style={{ ...card, marginBottom: 10, background: "#111827" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                          <div>
-                            <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>{sl.label}</p>
-                            <p style={{ margin: "2px 0", fontSize: 11, color: "#64748b" }}>{loc?.name || "—"}</p>
-                          </div>
-                          <button
-                            onClick={() => deleteScenLayer(sl.id)}
-                            style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer" }}
-                          >
-                            🗑️
-                          </button>
-                        </div>
+                  {scenLayers.map((sl) => {
+                    const loc = buildings.find((b) => b.id === sl.building_id);
+                    const cat = CATEGORIES.find((c) => c.id === sl.category);
+                    const real = layers.find((l) => l.building_id === sl.building_id && l.category === sl.category);
 
+                    return (
+                      <div key={sl.id} style={{ background: "#1e293b", borderRadius: 8, padding: "10px 12px", marginBottom: 8 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <p style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>{cat?.label || sl.category}</p>
+                          <button onClick={() => void deleteScenLayer(sl.id)} style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer" }}>✕</button>
+                        </div>
+                        <p style={{ margin: "2px 0 8px", fontSize: 12, color: "#94a3b8" }}>{loc?.name} — {sl.label}</p>
                         <div style={{ display: "flex", gap: 8 }}>
                           <div style={{ flex: 1, background: "#0f172a", borderRadius: 6, padding: "6px 8px" }}>
                             <p style={{ margin: 0, fontSize: 11, color: "#64748b" }}>{t.current}</p>
-                            <p style={{ margin: 0, fontSize: 13, color: "#e2e8f0", fontWeight: 600 }}>
-                              {current ? `${current.value} ${current.unit}` : "No data"}
+                            <p style={{ margin: 0, fontSize: 13, color: "#94a3b8", fontWeight: 600 }}>
+                              {real ? `${real.value} ${real.unit}` : "No data"}
                             </p>
                           </div>
                           <div style={{ flex: 1, background: "#1a0f3a", borderRadius: 6, padding: "6px 8px" }}>
                             <p style={{ margin: 0, fontSize: 11, color: "#7c3aed" }}>{t.scenario}</p>
-                            <p style={{ margin: 0, fontSize: 13, color: "#c4b5fd", fontWeight: 600 }}>
-                              {sl.value} {sl.unit}
-                            </p>
+                            <p style={{ margin: 0, fontSize: 13, color: "#c4b5fd", fontWeight: 600 }}>{sl.value} {sl.unit}</p>
                           </div>
                         </div>
                       </div>
                     );
                   })}
 
-                  {scenLayers.length === 0 && !showScenLayer && (
-                    <p style={{ color: "#64748b", fontSize: 13 }}>No data added yet.</p>
-                  )}
+                  {scenLayers.length === 0 && !showScenLayer && <p style={{ color: "#64748b", fontSize: 13 }}>No data added yet.</p>}
                 </div>
               )}
 
-              {scenarios.length === 0 && !showNewScen && (
-                <p style={{ color: "#64748b", fontSize: 13 }}>{t.noScenarios}</p>
-              )}
+              {scenarios.length === 0 && !showNewScen && <p style={{ color: "#64748b", fontSize: 13 }}>{t.noScenarios}</p>}
             </div>
           )}
 
@@ -1432,54 +1334,58 @@ export default function Platform() {
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                 <h2 style={{ margin: 0, fontSize: 15 }}>🏗️ {t.infra}</h2>
-                <button onClick={() => setShowNewInfra(!showNewInfra)} style={sBtn(showNewInfra ? "#475569" : "#0891b2")}>
+                <button onClick={() => setShowNewInfra(!showNewInfra)} style={smallButton(showNewInfra ? "#475569" : "#0891b2")}>
                   {showNewInfra ? t.cancel : t.newInfra}
                 </button>
               </div>
 
               {showNewInfra && (
-                <div style={{ ...card, display: "flex", flexDirection: "column", gap: 8 }}>
-                  <select style={inp} value={infraType} onChange={e => setInfraType(e.target.value)}>
-                    {INFRA_TYPES.map(i => (
+                <div style={{ ...cardStyle, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <select style={inputStyle} value={infraType} onChange={(e) => setInfraType(e.target.value)}>
+                    {INFRA_TYPES.map((i) => (
                       <option key={i.id} value={i.id}>{i.label}</option>
                     ))}
                   </select>
 
-                  <input type="text" placeholder={t.infraName} style={inp} value={infraName} onChange={e => setInfraName(e.target.value)} />
-                  <input type="text" placeholder={t.description} style={inp} value={infraDesc} onChange={e => setInfraDesc(e.target.value)} />
+                  <input type="text" placeholder={t.infraName} style={inputStyle} value={infraName} onChange={(e) => setInfraName(e.target.value)} />
+                  <input type="text" placeholder={t.description} style={inputStyle} value={infraDesc} onChange={(e) => setInfraDesc(e.target.value)} />
 
                   <p style={{ margin: 0, fontSize: 11, color: "#64748b" }}>{t.position}:</p>
                   <div style={{ display: "flex", gap: 6 }}>
-                    {([["X", infraX, setInfraX], ["Y", infraY, setInfraY], ["Z", infraZ, setInfraZ]] as [string, string, (v: string) => void][]).map(([label, val, set]) => (
-                      <input key={label} type="text" placeholder={label} style={{ ...inp, width: "33%" }} value={val} onChange={e => set(e.target.value)} />
+                    {([
+                      ["X", infraX, setInfraX],
+                      ["Y", infraY, setInfraY],
+                      ["Z", infraZ, setInfraZ],
+                    ] as const).map(([label, val, set]) => (
+                      <input key={label} type="text" placeholder={label} style={{ ...inputStyle, width: "33%" }} value={val} onChange={(e) => set(e.target.value)} />
                     ))}
                   </div>
 
                   <p style={{ margin: 0, fontSize: 11, color: "#64748b" }}>{t.size}:</p>
                   <div style={{ display: "flex", gap: 6 }}>
-                    {([["W", infraW, setInfraW], ["H", infraH, setInfraH], ["D", infraD, setInfraD]] as [string, string, (v: string) => void][]).map(([label, val, set]) => (
-                      <input key={label} type="text" placeholder={label} style={{ ...inp, width: "33%" }} value={val} onChange={e => set(e.target.value)} />
+                    {([
+                      ["W", infraW, setInfraW],
+                      ["H", infraH, setInfraH],
+                      ["D", infraD, setInfraD],
+                    ] as const).map(([label, val, set]) => (
+                      <input key={label} type="text" placeholder={label} style={{ ...inputStyle, width: "33%" }} value={val} onChange={(e) => set(e.target.value)} />
                     ))}
                   </div>
 
-                  <button onClick={saveInfra} style={btn("#0891b2")}>{t.addToScene}</button>
+                  <button onClick={saveInfra} style={primaryButton("#0891b2")}>{t.addToScene}</button>
                 </div>
               )}
 
-              {infra.map(i => {
-                const it = INFRA_TYPES.find(x => x.id === i.type);
+              {infra.map((i) => {
+                const it = INFRA_TYPES.find((x) => x.id === i.type);
                 return (
-                  <div key={i.id} style={{ ...card, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div key={i.id} style={{ ...cardStyle, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div>
-                      <p style={{ margin: 0, fontWeight: 600, fontSize: 14 }}>
-                        {it?.label.split(" ")[0]} {i.name}
-                      </p>
-                      <p style={{ margin: "2px 0 0", fontSize: 11, color: "#64748b" }}>
-                        {i.x},{i.y},{i.z} · {i.width}×{i.height}×{i.depth}
-                      </p>
+                      <p style={{ margin: 0, fontWeight: 600, fontSize: 14 }}>{it?.label.split(" ")[0]} {i.name}</p>
+                      <p style={{ margin: "2px 0 0", fontSize: 11, color: "#64748b" }}>{i.x},{i.y},{i.z} · {i.width}×{i.height}×{i.depth}</p>
                     </div>
                     <button
-                      onClick={() => deleteInfra(i.id)}
+                      onClick={() => void deleteInfra(i.id)}
                       style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer" }}
                     >
                       🗑️
@@ -1488,9 +1394,7 @@ export default function Platform() {
                 );
               })}
 
-              {infra.length === 0 && !showNewInfra && (
-                <p style={{ color: "#64748b", fontSize: 13 }}>{t.noInfra}</p>
-              )}
+              {infra.length === 0 && !showNewInfra && <p style={{ color: "#64748b", fontSize: 13 }}>{t.noInfra}</p>}
             </div>
           )}
 
@@ -1498,7 +1402,7 @@ export default function Platform() {
             <div>
               <h2 style={{ margin: "0 0 12px", fontSize: 15 }}>🌦️ {t.weather}</h2>
 
-              <div style={card}>
+              <div style={cardStyle}>
                 <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: 14 }}>{t.rainSim}</p>
                 <p style={{ margin: "0 0 10px", fontSize: 12, color: "#94a3b8" }}>{t.rainDesc}</p>
 
@@ -1508,12 +1412,12 @@ export default function Platform() {
                     min={0}
                     max={300}
                     placeholder={t.rainInput}
-                    style={{ ...inp, width: "70%" }}
+                    style={{ ...inputStyle, width: "70%" }}
                     value={rainInput}
-                    onChange={e => setRainInput(e.target.value)}
+                    onChange={(e) => setRainInput(e.target.value)}
                   />
-                  <button onClick={() => setRainMmPerDay(parseFloat(rainInput) || 0)} style={sBtn("#3b82f6")}>
-                    Apply
+                  <button onClick={() => setRainMmPerDay(parseFloat(rainInput) || 0)} style={smallButton("#3b82f6")}>
+                    {t.applyBtn}
                   </button>
                 </div>
 
@@ -1523,8 +1427,8 @@ export default function Platform() {
                   max={150}
                   step={1}
                   value={rainMmPerDay}
-                  onChange={e => {
-                    setRainMmPerDay(parseInt(e.target.value));
+                  onChange={(e) => {
+                    setRainMmPerDay(parseInt(e.target.value, 10));
                     setRainInput(e.target.value);
                   }}
                   style={{ width: "100%", accentColor: "#3b82f6", marginBottom: 6 }}
@@ -1535,88 +1439,81 @@ export default function Platform() {
                   <span>150 {t.rainInput}</span>
                 </div>
 
-                <div style={{ fontSize: 12, color: "#94a3b8" }}>
+                <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>
                   {t.rainLevels[Math.min(Math.floor(rainMmPerDay / 30), t.rainLevels.length - 1)]}
                 </div>
+
+                {rainMmPerDay > 0 && (
+                  <button
+                    onClick={() => {
+                      setRainMmPerDay(0);
+                      setRainInput("0");
+                    }}
+                    style={smallButton("#475569")}
+                  >
+                    {t.rainOff}
+                  </button>
+                )}
               </div>
 
-              <div style={card}>
+              <div style={cardStyle}>
                 <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: 14 }}>{t.sunShadow}</p>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                  <button
-                    onClick={() => setSunActive(!sunActive)}
-                    style={sBtn(sunActive ? "#f59e0b" : "#475569")}
-                  >
-                    {sunActive ? t.on : t.off}
+                <p style={{ margin: "0 0 10px", fontSize: 12, color: "#94a3b8" }}>{t.sunDesc}</p>
+
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                  <button onClick={() => setSunActive(!sunActive)} style={smallButton(sunActive ? "#f59e0b" : "#475569")}>
+                    {sunActive ? t.sunOn : t.sunOff}
                   </button>
-                  <span style={{ fontSize: 12, color: "#94a3b8" }}>
-                    {sunActive ? t.sunActive : ""}
-                  </span>
+                  {sunActive && <span style={{ fontSize: 11, color: "#fbbf24" }}>{t.sunActive}</span>}
                 </div>
 
                 {sunActive && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    <div>
-                      <p style={{ margin: "0 0 4px", fontSize: 11, color: "#64748b" }}>
-                        {t.hour}: {sunHour}:00
-                      </p>
+                  <>
+                    <div style={{ marginBottom: 10 }}>
+                      <p style={{ margin: "0 0 4px", fontSize: 11, color: "#64748b" }}>{t.hourLabel}: {sunHour}:00</p>
                       <input
                         type="range"
                         min={0}
                         max={23}
                         step={1}
                         value={sunHour}
-                        onChange={e => setSunHour(parseInt(e.target.value))}
+                        onChange={(e) => setSunHour(parseInt(e.target.value, 10))}
                         style={{ width: "100%", accentColor: "#f59e0b" }}
                       />
                     </div>
+
                     <div>
-                      <p style={{ margin: "0 0 4px", fontSize: 11, color: "#64748b" }}>
-                        {t.month}: {t.months[sunMonth - 1]}
-                      </p>
+                      <p style={{ margin: "0 0 4px", fontSize: 11, color: "#64748b" }}>{t.monthLabel}: {t.months[sunMonth - 1]}</p>
                       <input
                         type="range"
                         min={1}
                         max={12}
                         step={1}
                         value={sunMonth}
-                        onChange={e => setSunMonth(parseInt(e.target.value))}
+                        onChange={(e) => setSunMonth(parseInt(e.target.value, 10))}
                         style={{ width: "100%", accentColor: "#f59e0b" }}
                       />
                     </div>
-                  </div>
+                  </>
                 )}
               </div>
 
-              <div style={card}>
+              <div style={cardStyle}>
                 <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: 14 }}>{t.extremeWeather}</p>
 
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
-                  {([
-                    { id: null, label: t.extremeOff, color: "#475569" },
-                    { id: "flood", label: t.extremeFlood, color: "#1d4ed8" },
-                    { id: "storm", label: t.extremeStorm, color: "#4f46e5" },
-                    { id: "heatwave", label: t.extremeHeatwave, color: "#b45309" },
-                  ] as { id: "flood" | "storm" | "heatwave" | null; label: string; color: string }[]).map(ev => (
-                    <button
-                      key={String(ev.id)}
-                      onClick={() => setExtremeType(ev.id)}
-                      style={{
-                        background: extremeType === ev.id ? ev.color : "#1e293b",
-                        color: "white",
-                        border: `1px solid ${extremeType === ev.id ? ev.color : "#334155"}`,
-                        borderRadius: 8,
-                        padding: "10px 14px",
-                        cursor: "pointer",
-                        fontWeight: extremeType === ev.id ? "bold" : "normal",
-                        fontSize: 13,
-                        textAlign: "left",
-                      }}
-                    >
-                      {ev.label}
-                    </button>
-                  ))}
-                </div>
+                <select
+                  style={{ ...inputStyle, marginBottom: 12 }}
+                  value={extremeType ?? ""}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setExtremeType(val === "" ? null : (val as "flood" | "storm" | "heatwave"));
+                  }}
+                >
+                  <option value="">{t.extremeOff}</option>
+                  <option value="flood">{t.extremeFlood}</option>
+                  <option value="storm">{t.extremeStorm}</option>
+                  <option value="heatwave">{t.extremeHeatwave}</option>
+                </select>
 
                 {extremeType && (
                   <div style={{ background: "#1e293b", borderRadius: 10, padding: 14 }}>
@@ -1642,7 +1539,7 @@ export default function Platform() {
                       max={10}
                       step={1}
                       value={extremeIntensity}
-                      onChange={e => setExtremeIntensity(parseInt(e.target.value))}
+                      onChange={(e) => setExtremeIntensity(parseInt(e.target.value, 10))}
                       style={{ width: "100%", accentColor: intensityColor }}
                     />
 
@@ -1674,7 +1571,7 @@ export default function Platform() {
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                 <h2 style={{ margin: 0, fontSize: 15 }}>📡 {t.sensors}</h2>
-                <button onClick={() => setShowNewSensor(!showNewSensor)} style={sBtn(showNewSensor ? "#475569" : "#10b981")}>
+                <button onClick={() => setShowNewSensor(!showNewSensor)} style={smallButton(showNewSensor ? "#475569" : "#10b981")}>
                   {showNewSensor ? t.cancel : t.newSensor}
                 </button>
               </div>
@@ -1684,16 +1581,16 @@ export default function Platform() {
               </p>
 
               {showNewSensor && (
-                <div style={{ ...card, display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ ...cardStyle, display: "flex", flexDirection: "column", gap: 8 }}>
                   <input
                     type="text"
-                    placeholder="Sensor name (e.g. Rain gauge North)"
-                    style={inp}
+                    placeholder={t.sensorNamePlaceholder}
+                    style={inputStyle}
                     value={sensorName}
-                    onChange={e => setSensorName(e.target.value)}
+                    onChange={(e) => setSensorName(e.target.value)}
                   />
 
-                  <select style={inp} value={sensorType} onChange={e => setSensorType(e.target.value)}>
+                  <select style={inputStyle} value={sensorType} onChange={(e) => setSensorType(e.target.value)}>
                     {[
                       ["rain_gauge", "🌧️ Rain gauge"],
                       ["temperature", "🌡️ Temperature"],
@@ -1710,41 +1607,45 @@ export default function Platform() {
                   <input
                     type="text"
                     placeholder={t.description}
-                    style={inp}
+                    style={inputStyle}
                     value={sensorDesc}
-                    onChange={e => setSensorDesc(e.target.value)}
+                    onChange={(e) => setSensorDesc(e.target.value)}
                   />
 
                   <p style={{ margin: 0, fontSize: 11, color: "#64748b" }}>{t.position}:</p>
                   <div style={{ display: "flex", gap: 6 }}>
-                    {([["X", sensorX, setSensorX], ["Y", sensorY, setSensorY], ["Z", sensorZ, setSensorZ]] as [string, string, (v: string) => void][]).map(([label, val, set]) => (
-                      <input key={label} type="text" placeholder={label} style={{ ...inp, width: "33%" }} value={val} onChange={e => set(e.target.value)} />
+                    {([
+                      ["X", sensorX, setSensorX],
+                      ["Y", sensorY, setSensorY],
+                      ["Z", sensorZ, setSensorZ],
+                    ] as const).map(([label, val, set]) => (
+                      <input key={label} type="text" placeholder={label} style={{ ...inputStyle, width: "33%" }} value={val} onChange={(e) => set(e.target.value)} />
                     ))}
                   </div>
 
-                  <p style={{ margin: 0, fontSize: 11, color: "#64748b" }}>Current reading (optional):</p>
+                  <p style={{ margin: 0, fontSize: 11, color: "#64748b" }}>{t.sensorValueLabel}</p>
                   <div style={{ display: "flex", gap: 8 }}>
                     <input
                       type="text"
                       placeholder={t.sensorValue}
-                      style={{ ...inp, width: "50%" }}
+                      style={{ ...inputStyle, width: "50%" }}
                       value={sensorValue}
-                      onChange={e => setSensorValue(e.target.value)}
+                      onChange={(e) => setSensorValue(e.target.value)}
                     />
                     <input
                       type="text"
                       placeholder={t.sensorUnit}
-                      style={{ ...inp, width: "50%" }}
+                      style={{ ...inputStyle, width: "50%" }}
                       value={sensorUnit}
-                      onChange={e => setSensorUnit(e.target.value)}
+                      onChange={(e) => setSensorUnit(e.target.value)}
                     />
                   </div>
 
-                  <button onClick={saveSensor} style={btn("#10b981")}>{t.save}</button>
+                  <button onClick={saveSensor} style={primaryButton("#10b981")}>{t.save}</button>
                 </div>
               )}
 
-              {sensors.map(s => {
+              {sensors.map((s) => {
                 const typeMap: Record<string, string> = {
                   rain_gauge: "🌧️",
                   temperature: "🌡️",
@@ -1756,7 +1657,7 @@ export default function Platform() {
                 };
 
                 return (
-                  <div key={s.id} style={{ ...card, display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div key={s.id} style={{ ...cardStyle, display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                     <div>
                       <p style={{ margin: 0, fontWeight: 600, fontSize: 14 }}>
                         {typeMap[s.type] || "📡"} {s.name}
@@ -1775,7 +1676,7 @@ export default function Platform() {
                     </div>
 
                     <button
-                      onClick={() => deleteSensor(s.id)}
+                      onClick={() => void deleteSensor(s.id)}
                       style={{ background: "none", border: "none", color: "#f87171", cursor: "pointer" }}
                     >
                       🗑️
